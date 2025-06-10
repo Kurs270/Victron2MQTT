@@ -14,6 +14,8 @@
 #include <ESPAsyncTCP.h>
 #include <ESPAsyncWebServer.h>
 
+#include <limits>
+
 // #include <WebSerialLite.h>
 #include <MycilaWebSerial.h>
 #include <SoftwareSerial.h>
@@ -34,7 +36,11 @@
 #include "html.h"          //the HTML content
 #include "htmlProzessor.h" // The html Prozessor
 
+#include "VeDirectHexFrame.h"
+
 String topic = ""; // Default first part of topic. We will add device ID in setup
+
+#define SEND_HEX
 
 // flag for saving data and other things
 bool shouldSaveConfig = false;
@@ -204,11 +210,17 @@ void setup()
   rtcMemory.save();
   if (_settings.data.keepRcState)
     remoteControlState = _settings.data.rcState;
+  #ifndef SEND_HEX
   digitalWrite(MYPORT_TX, remoteControlState);
+  #endif
 
   haAutoDiscTrigger = _settings.data.haDiscovery;
   WiFi.persistent(true); // fix wifi save bug
+  #ifdef SEND_HEX
+  veSerial.begin(VICTRON_BAUD, SWSERIAL_8N1, MYPORT_RX, MYPORT_TX, false );
+  #else
   veSerial.begin(VICTRON_BAUD, SWSERIAL_8N1, MYPORT_RX /*, MYPORT_TX, false*/);
+  #endif
   veSerial.flush();
   veSerial.enableRxGPIOPullUp(false);
   myve.callback(prozessData);
@@ -322,6 +334,37 @@ void setup()
       remoteControl((message == "1") ? true:false);
     }    
         request->send(200, "text/plain", "message received"); });
+
+    server.on("/voltage", HTTP_GET, [](AsyncWebServerRequest *request)
+              {
+      if(strlen(_settings.data.httpUser) > 0 && !request->authenticate(_settings.data.httpUser, _settings.data.httpPass)) return request->requestAuthentication();
+      String message;
+      String response = "message received";  
+ 
+      if (request->hasParam("voltage")) 
+      {
+        double dMin = std::numeric_limits<double>::min();
+        double dMax = std::numeric_limits<double>::max();
+
+        if ( request->hasParam( "min" ) )
+          dMin = atof( request->getParam( "min")->value().c_str() );
+        if ( request->hasParam( "max" ) )
+          dMax = atof( request->getParam( "max")->value().c_str() );
+
+        message = request->getParam("voltage")->value();
+        double dVoltage = atof( message.c_str() );
+        response = message;
+        if ( dVoltage >= dMin && dVoltage <= dMax )
+        {
+          CVeDirectHexFrame frame( HEXCMD_SET );
+          frame.SetShortRegister( 0x2002, 0.01, dVoltage );
+          frame.Finalize();
+          veSerial.write( frame.GetBuffer().c_str(), frame.GetBuffer().length() );
+          // Serial.println( frame.GetBuffer().c_str() );
+          response = frame.GetBuffer().c_str();
+        }
+      }    
+        request->send(200, "text/plain", response ); });
 
     server.on("/settings", HTTP_GET, [](AsyncWebServerRequest *request)
               {
