@@ -19,3 +19,5 @@ env.Append(CPPDEFINES=[
 ])
 
 env.Replace(PROGNAME="Victron2MQTT_%s_%s" % (str(env["PIOENV"]), env.GetProjectOption("custom_prog_version")))
+
+#print ( env.Dictionary() )

@@ -87,6 +87,8 @@ OneWire oneWire(TEMPSENS_PIN);
 DallasTemperature dallasTemp(&oneWire);
 NonBlockingDallas tempSens(&dallasTemp);
 
+#include "VoltageSetHandler.h"
+
 JsonDocument Json;
 #include "status-LED.h"
 ADC_MODE(ADC_VCC);
@@ -682,11 +684,18 @@ void setup()
   rtcMemory.save();
   if (_settings.get.keepRcState())
     remoteControlState = _settings.get.rcState();
+#ifndef V2MQTT_SUPPORT_SERIAL_WRITE
   digitalWrite(MYPORT_TX, remoteControlState);
-
+#endif
   haAutoDiscTrigger = _settings.get.haDiscovery();
   WiFi.persistent(true); // fix wifi save bug
+
+#ifdef V2MQTT_SUPPORT_SERIAL_WRITE
+  veSerial.begin(VICTRON_BAUD, SWSERIAL_8N1, MYPORT_RX, MYPORT_TX, false, VE_RX_BUFFER, VE_ISR_BUFFER);
+#else
   veSerial.begin(VICTRON_BAUD, SWSERIAL_8N1, MYPORT_RX, -1, false, VE_RX_BUFFER, VE_ISR_BUFFER);
+#endif
+
   veSerial.flush();
   veSerial.enableRxGPIOPullUp(false);
   myve.callback(queueVeDataProcessing);
@@ -1058,8 +1067,12 @@ server.on(
   }
 );
 
-
-
+#ifdef V2MQTT_SUPPORT_SERIAL_WRITE
+    server.on("/voltage", HTTP_GET, [](AsyncWebServerRequest *request)
+    {
+      VoltageSetHandler( request, _settings, veSerial );
+    });
+#endif
 
     server.onNotFound([](AsyncWebServerRequest *request)
                       { request->send(418, "text/plain", "418 I'm a teapot"); });
